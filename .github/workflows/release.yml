@@ -1,99 +1,82 @@
-name: Release
+name: Build Mod Package
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  TARGET_PLATFORM: windows
+  TARGET_ARCH: x64
+  # Reserved, disabled targets: windows_arm, macos_x64, macos_arm, linux_x64, linux_arm.
+  MOD_NAME: RedCli
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
-        include:
-          - os: ubuntu-latest
-            artifact_name: red-cli-linux
-            binary_name: red-cli
-          - os: macos-latest
-            artifact_name: red-cli-macos
-            binary_name: red-cli
-          - os: windows-latest
-            artifact_name: red-cli-windows
-            binary_name: red-cli.exe
+  package:
+    runs-on: windows-2025
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: dart-lang/setup-dart@v1
 
-      - name: Convert version tag from "vX.Y.Z" to "X.Y.Z"
-        shell: bash
+      - name: Apply tag version to source
+        if: github.ref_type == 'tag'
+        shell: pwsh
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          (Get-Content pubspec.yaml -Raw) -replace '(?m)^version:\s*.+$', "version: $version" | Set-Content pubspec.yaml -NoNewline
+          if (-not (Select-String -Path pubspec.yaml -Pattern "^version:\s*$([regex]::Escape($version))\s*$" -Quiet)) {
+            throw "Failed to set pubspec.yaml version to $version"
+          }
 
       - name: Setup project
         run: dart pub get
 
-      - name: Build binary
-        run: dart compile exe bin/main.dart -o ${{ matrix.binary_name }}
+      - name: Build windows_x64
+        run: dart compile exe bin/main.dart -o red-cli.exe
 
-      - name: Create archive
-        shell: bash
+      - name: Stage package contents
+        shell: pwsh
         run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            7z a "${{ matrix.artifact_name }}-${{ env.VERSION }}.zip" "${{ matrix.binary_name }}" LICENSE README.md
-          else
-            zip "${{ matrix.artifact_name }}-${{ env.VERSION }}.zip" "${{ matrix.binary_name }}" LICENSE README.md
-          fi
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item red-cli.exe, LICENSE, README.md -Destination package -Force
+
+      - name: Normalize artifact name
+        id: meta
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            $stable = @(git tag -l --sort=-v:refname | Where-Object { $_ -match '^v?\d+\.\d+\.\d+$' })
+            $any = @(git tag -l --sort=-v:refname | Where-Object { $_ -match '^v?\d' })
+            $tag = @($stable + $any) | Select-Object -First 1
+            if ($tag) { $tag.TrimStart('v') } else { '0.0.0' }
+          }
+          $suffix = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            ''
+          } else {
+            "_$(Get-Date -Format 'yyyy.M').$((git rev-list --count --since="$(Get-Date -Day 1 -Format yyyy-MM-dd)" HEAD))"
+          }
+          $artifact = "${env:MOD_NAME}_v${version}_${env:TARGET_PLATFORM}_${env:TARGET_ARCH}${suffix}.zip"
+          Compress-Archive -Path package/* -DestinationPath $artifact -CompressionLevel Optimal -Force
+          "artifact=$artifact" >> $env:GITHUB_OUTPUT
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}-${{ env.VERSION }}
-          path: ${{ matrix.artifact_name }}-${{ env.VERSION }}.zip
+          name: ${{ steps.meta.outputs.artifact }}
+          path: ${{ steps.meta.outputs.artifact }}
+          if-no-files-found: error
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Convert version tag from "vX.Y.Z" to "X.Y.Z"
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-      - uses: actions/download-artifact@v5
-        with:
-          name: red-cli-linux-${{ env.VERSION }}
-          path: .
-      - uses: actions/download-artifact@v5
-        with:
-          name: red-cli-macos-${{ env.VERSION }}
-          path: .
-      - uses: actions/download-artifact@v5
-        with:
-          name: red-cli-windows-${{ env.VERSION }}
-          path: .
-
-      - name: Extract CHANGELOG
-        id: changelog
-        uses: release-flow/keep-a-changelog-action@v3
-        with:
-          command: query
-          version: latest
-
-      - uses: softprops/action-gh-release@v1
-        name: Create release
-        with:
-          tag_name: v${{ env.VERSION }}
-          name: v${{ env.VERSION }}
-          body: ${{ steps.changelog.outputs.release-notes }}
-          files: |
-            red-cli-linux-${{ env.VERSION }}.zip
-            red-cli-macos-${{ env.VERSION }}.zip
-            red-cli-windows-${{ env.VERSION }}.zip
-
+      - name: Create draft release
+        if: github.ref_type == 'tag'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$env:GITHUB_REF_NAME" "${{ steps.meta.outputs.artifact }}" --draft --generate-notes --verify-tag

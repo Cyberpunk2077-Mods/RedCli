@@ -5,7 +5,7 @@ branding:
   color: 'red'
 inputs:
   version:
-    description: 'Version of red-cli to download (e.g. "1.0.0"). Defaults to "latest".'
+    description: 'Version of red-cli to download (e.g. "0.5.0"). Defaults to "latest".'
     required: false
     default: 'latest'
 runs:
@@ -15,44 +15,59 @@ runs:
       id: os
       shell: bash
       run: |
-        if [ "$RUNNER_OS" == "Linux" ]; then
-          echo "asset=red-cli-linux" >> $GITHUB_OUTPUT
-          echo "binary=red-cli" >> $GITHUB_OUTPUT
-        elif [ "$RUNNER_OS" == "macOS" ]; then
-          echo "asset=red-cli-macos" >> $GITHUB_OUTPUT
-          echo "binary=red-cli" >> $GITHUB_OUTPUT
-        elif [ "$RUNNER_OS" == "Windows" ]; then
-          echo "asset=red-cli-windows" >> $GITHUB_OUTPUT
-          echo "binary=red-cli.exe" >> $GITHUB_OUTPUT
+        # Org packages currently publish windows_x64 only (Cyberpunk2077_Mod.md).
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          echo "platform=windows" >> "$GITHUB_OUTPUT"
+          echo "arch=x64" >> "$GITHUB_OUTPUT"
+          echo "binary=red-cli.exe" >> "$GITHUB_OUTPUT"
         else
-          echo "Unsupported OS: $RUNNER_OS"
+          echo "Unsupported OS for org RedCli packages: $RUNNER_OS (only windows_x64 is published)"
           exit 1
         fi
 
     - name: Download red-cli
       id: download
       shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
         VERSION="${{ inputs.version }}"
-        ASSET="${{ steps.os.outputs.asset }}"
         BINARY="${{ steps.os.outputs.binary }}"
-
-        if [ "$VERSION" == "latest" ]; then
-          URL=$(curl -s https://api.github.com/repos/rayshader/cp2077-red-cli/releases/latest | jq -r ".assets[] | select(.name | test(\"$ASSET-\")) | .browser_download_url")
-        else
-          URL=$(curl -s https://api.github.com/repos/rayshader/cp2077-red-cli/releases/tags/v$VERSION | jq -r ".assets[] | select(.name | test(\"$ASSET-$VERSION\")) | .browser_download_url")
+        REPO="Cyberpunk2077-Mods/RedCli"
+        AUTH_HEADER=()
+        if [ -n "${GH_TOKEN:-}" ]; then
+          AUTH_HEADER=(-H "Authorization: Bearer ${GH_TOKEN}")
         fi
 
-        if [ -z "$URL" ]; then
-          echo "Error: Could not find download URL for $ASSET-$VERSION"
+        if [ "$VERSION" == "latest" ]; then
+          JSON=$(curl -fsSL "${AUTH_HEADER[@]}" "https://api.github.com/repos/${REPO}/releases?per_page=20")
+        else
+          JSON=$(curl -fsSL "${AUTH_HEADER[@]}" "https://api.github.com/repos/${REPO}/releases/tags/v${VERSION}")
+          JSON="[$JSON]"
+        fi
+
+        URL=$(echo "$JSON" | jq -r '
+          [.[] | select(.assets | length > 0)] as $rels
+          | ($rels[] | .assets[] | select(.name | test("^RedCli_v.+_windows_x64\\.zip$")) | .browser_download_url) // empty
+        ' | head -n1)
+
+        if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+          URL=$(echo "$JSON" | jq -r '
+            [.[] | select(.assets | length > 0)] as $rels
+            | ($rels[] | .assets[] | select(.name | test("(?i)(windows|win64|msvc).*\\.zip$")) | .browser_download_url) // empty
+          ' | head -n1)
+        fi
+
+        if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+          echo "Error: Could not find a windows_x64 red-cli asset on ${REPO}"
           exit 1
         fi
 
         echo "Downloading red-cli from $URL"
-        curl -sL "$URL" -o "$ASSET.zip"
-        unzip "$ASSET.zip"
-        chmod +x "$BINARY"
-        echo "binary=$BINARY" >> $GITHUB_OUTPUT
+        curl -fsSL "${AUTH_HEADER[@]}" -H "Accept: application/octet-stream" "$URL" -o red-cli.zip
+        unzip -o red-cli.zip
+        chmod +x "$BINARY" || true
+        echo "binary=$BINARY" >> "$GITHUB_OUTPUT"
 
     - name: Run red-cli
       shell: bash

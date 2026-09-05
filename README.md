@@ -1,6 +1,6 @@
 # Red CLI
 ![Cyberpunk 2077](https://img.shields.io/badge/Cyberpunk%202077-v2.3-blue)
-![GitHub License](https://img.shields.io/github/license/rayshader/cp2077-red-cli)
+![GitHub License](https://img.shields.io/github/license/Cyberpunk2077-Mods/RedCli)
 [![Donate](https://img.shields.io/badge/donate-buy%20me%20a%20coffee-yellow)](https://www.buymeacoffee.com/lpfreelance)
 
 A tool to bundle scripts of a mod for Cyberpunk 2077.
@@ -265,10 +265,10 @@ If you have a bug, please fill an [issue].
 If you have questions or feedback, don't hesitate to ask me on [Discord].
 
 <!-- Table of links -->
-[latest release]: https://github.com/rayshader/cp2077-red-cli/releases/latest
+[latest release]: https://github.com/Cyberpunk2077-Mods/RedCli/releases/latest
 [environment variables]: https://www.google.com/search?q=add+environment+variable+windows
-[test/]: https://github.com/rayshader/cp2077-red-cli/tree/master/test
-[issue]: https://github.com/rayshader/cp2077-red-cli/issues
+[test/]: https://github.com/Cyberpunk2077-Mods/RedCli/tree/master/test
+[issue]: https://github.com/Cyberpunk2077-Mods/RedCli/issues
 [Discord]: https://discord.com/channels/717692382849663036/1254464502968356965
 [Redscript Language Server]: https://github.com/jac3km4/redscript-ide
 [Red Hot Tools]: https://github.com/psiberx/cp2077-red-hot-tools/

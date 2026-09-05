@@ -11,7 +11,7 @@ import 'data/red_config.dart';
 
 class RedRunner extends CommandRunner {
   @override
-  final String? usageFooter = '\nGitHub: https://github.com/rayshader/cp2077-red-cli'
+  final String? usageFooter = '\nGitHub: https://github.com/Cyberpunk2077-Mods/RedCli'
       '\nDiscord: https://discord.com/channels/717692382849663036/1254464502968356965';
 
   RedRunner()
@@ -25,7 +25,16 @@ class RedRunner extends CommandRunner {
 
 void main(List<String> args) async {
   final runner = RedRunner();
-  final config = getConfig();
+  // pack/bundle only stage project files; install/watch need a real game tree.
+  String? command;
+  for (final arg in args) {
+    if (!arg.startsWith('-')) {
+      command = arg;
+      break;
+    }
+  }
+  final requireGame = command == 'install' || command == 'watch';
+  final config = getConfig(requireGame: requireGame);
 
   if (config == null) {
     exit(1);
